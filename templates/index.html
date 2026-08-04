@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 Backup Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --text: #f8fafc;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --primary: #3b82f6;
+            --healthy: #10b981;
+            --stale: #ef4444;
+            --empty: #64748b;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-weight: 600;
+            font-size: 2.5rem;
+            margin: 0;
+            background: -webkit-linear-gradient(45deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stats {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            flex: 1;
+            backdrop-filter: blur(10px);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin: 0.5rem 0;
+        }
+        
+        .stat-healthy .stat-value { color: var(--healthy); }
+        .stat-stale .stat-value { color: var(--stale); }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .bucket-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bucket-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .bucket-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-healthy { background-color: var(--healthy); box-shadow: 0 0 10px var(--healthy); }
+        .status-stale { background-color: var(--stale); box-shadow: 0 0 10px var(--stale); }
+        .status-empty { background-color: var(--empty); }
+        .status-error { background-color: var(--stale); }
+
+        .bucket-details {
+            font-size: 0.9rem;
+            color: #cbd5e1;
+            margin-top: 1rem;
+        }
+
+        .bucket-details p {
+            margin: 0.5rem 0;
+        }
+
+        .timestamp {
+            font-family: monospace;
+            background: rgba(0,0,0,0.3);
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            font-size: 1.5rem;
+            color: #94a3b8;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .stats { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>S3 Backup Monitor</h1>
+                <div id="last-fetched" style="font-size:0.9rem; color:#94a3b8; margin-top:0.5rem;">Data terakhir ditarik: Memuat...</div>
+            </div>
+            <div style="display:flex; gap:1rem;">
+                <button onclick="exportToExcel()" style="background:#10b981; color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Download hasil pindaian terakhir sebagai Excel/CSV">⬇️ Export (CSV)</button>
+                <button onclick="fetchData(false, 'deep')" style="background:#64748b; color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Hitung ulang Total Storage (memakan waktu agak lama)">Deep Refresh</button>
+                <button onclick="fetchData()" style="background:var(--primary); color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Cek status Last Update dengan sangat cepat">Refresh Data</button>
+            </div>
+        </header>
+
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div>Total Buckets</div>
+                <div class="stat-value" id="total-buckets">-</div>
+            </div>
+            <div class="stat-card stat-healthy">
+                <div>Healthy (Updated &lt; 48h)</div>
+                <div class="stat-value" id="healthy-buckets">-</div>
+            </div>
+            <div class="stat-card stat-stale">
+                <div>Stale / Error</div>
+                <div class="stat-value" id="stale-buckets">-</div>
+            </div>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            Memuat data dari s3member.pajakku.com...
+        </div>
+
+        <div class="dashboard" id="dashboard"></div>
+    </div>
+
+    <script>
+        function formatBytes(bytes, decimals = 2) {
+            if (!+bytes) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+        }
+
+        function timeSince(date) {
+            if (!date) return 'Unknown';
+            const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+            let interval = seconds / 31536000;
+            if (interval > 1) return Math.floor(interval) + " years ago";
+            interval = seconds / 2592000;
+            if (interval > 1) return Math.floor(interval) + " months ago";
+            interval = seconds / 86400;
+            if (interval > 1) return Math.floor(interval) + " days ago";
+            interval = seconds / 3600;
+            if (interval > 1) return Math.floor(interval) + " hours ago";
+            interval = seconds / 60;
+            if (interval > 1) return Math.floor(interval) + " minutes ago";
+            return Math.floor(seconds) + " seconds ago";
+        }
+
+        const bucketStatuses = {};
+        let totalBucketsCount = 0;
+        let bucketDataCache = []; // Menyimpan data hasil tarikan terakhir untuk export
+
+        function exportToExcel() {
+            if (bucketDataCache.length === 0) {
+                alert('Belum ada data yang selesai dipindai.');
+                return;
+            }
+
+            let csv = "Bucket Name,Status,Last Update,Latest File,Total Storage\n";
+
+            bucketDataCache.forEach(bucket => {
+                let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
+                let lastUpdate = bucket.last_update ? new Date(bucket.last_update).toLocaleString() : 'N/A';
+                let latestFile = bucket.latest_file || 'N/A';
+                let sizeStr = formatBytes(bucket.size || 0);
+                
+                // Tambahkan tanda kutip ganda pada setiap kolom untuk menghindari error format CSV jika ada koma di dalam teks
+                let row = `"${bucket.name}","${statusText}","${lastUpdate}","${latestFile}","${sizeStr}"`;
+                csv += row + "\n";
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "S3_Backup_Report.csv");
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function updateStatsUI() {
+            let healthy = 0, stale = 0;
+            for (const key in bucketStatuses) {
+                if (bucketStatuses[key] === 'healthy') healthy++;
+                else if (bucketStatuses[key] === 'stale' || bucketStatuses[key] === 'error') stale++;
+            }
+            document.getElementById('total-buckets').innerText = totalBucketsCount;
+            document.getElementById('healthy-buckets').innerText = healthy;
+            document.getElementById('stale-buckets').innerText = stale;
+        }
+
+        function saveToLocalStorage() {
+            const data = {
+                timestamp: document.getElementById('last-fetched').innerText,
+                buckets: bucketDataCache,
+                bucketStatuses: Object.assign({}, bucketStatuses),
+                totalBucketsCount: totalBucketsCount
+            };
+            localStorage.setItem('s3_monitor_data', JSON.stringify(data));
+        }
+
+        function loadFromLocalStorage() {
+            const cached = localStorage.getItem('s3_monitor_data');
+            if (cached) {
+                try {
+                    const data = JSON.parse(cached);
+                    if (data.buckets && data.buckets.length > 0) {
+                        return data;
+                    }
+                } catch (e) {
+                    console.error("Gagal membaca cache lokal", e);
+                }
+            }
+            return null;
+        }
+
+        function renderDashboardFromCache(data) {
+            document.getElementById('last-fetched').innerText = data.timestamp;
+            totalBucketsCount = data.totalBucketsCount;
+            bucketDataCache = data.buckets;
+            
+            // Restore bucketStatuses
+            for (const key in data.bucketStatuses) {
+                bucketStatuses[key] = data.bucketStatuses[key];
+            }
+            
+            updateStatsUI();
+            
+            const dashboard = document.getElementById('dashboard');
+            dashboard.innerHTML = '';
+            
+            data.buckets.forEach(bucket => {
+                const card = document.createElement('div');
+                card.className = 'bucket-card';
+                card.id = 'card-' + bucket.name.replace(/[^a-zA-Z0-9_-]/g, '');
+                
+                let statusColor = 'status-' + bucket.status;
+                let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
+                
+                let detailsHTML = '';
+                if (bucket.status === 'error') {
+                    detailsHTML = '<p style="color:var(--stale)">Error memuat data</p>';
+                } else if (bucket.status === 'empty') {
+                    detailsHTML = '<p>Bucket kosong, tidak ada backup.</p>';
+                } else {
+                    const dateObj = new Date(bucket.last_update);
+                    detailsHTML = `
+                        <p>Status: <strong style="color: ${bucket.status === 'healthy' ? 'var(--healthy)' : 'var(--stale)'}">${statusText}</strong></p>
+                        <p>Last Update: <span class="timestamp">${dateObj.toLocaleString()}</span></p>
+                        <p>Latest File: <span class="timestamp" title="${bucket.latest_file}">${bucket.latest_file.split('/').pop()}</span></p>
+                        <p>Total Storage: <strong>${formatBytes(bucket.size)}</strong></p>
+                        <p><i>${timeSince(bucket.last_update)}</i></p>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div class="bucket-name">
+                        ${bucket.name}
+                        <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                    </div>
+                    <div class="bucket-details">
+                        ${detailsHTML}
+                    </div>
+                `;
+                dashboard.appendChild(card);
+            });
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        let previousSizes = {};
+
+        async function fetchBucketDetail(bucketName, cardElement, mode = 'fast') {
+            try {
+                const res = await fetch('/api/bucket/' + encodeURIComponent(bucketName) + '?mode=' + mode);
+                const bucket = await res.json();
+                
+                // Jika mode fast, gunakan ukuran dari cache lokal agar angkanya tidak hilang (0 bytes)
+                if (bucket.size === null) {
+                    if (previousSizes[bucketName] !== undefined && previousSizes[bucketName] !== null) {
+                        bucket.size = previousSizes[bucketName];
+                    } else {
+                        bucket.size = 0;
+                    }
+                }
+                
+                // Simpan ke cache untuk keperluan export Excel
+                const existingIndex = bucketDataCache.findIndex(b => b.name === bucketName);
+                if (existingIndex !== -1) bucketDataCache[existingIndex] = bucket;
+                else bucketDataCache.push(bucket);
+                
+                bucketStatuses[bucketName] = bucket.status;
+                updateStatsUI();
+                saveToLocalStorage();
+
+                let statusColor = 'status-' + bucket.status;
+                let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
+                
+                let detailsHTML = '';
+                if (bucket.status === 'error') {
+                    detailsHTML = '<p style="color:var(--stale)">' + bucket.error + '</p>';
+                } else if (bucket.status === 'empty') {
+                    detailsHTML = '<p>Bucket kosong, tidak ada backup.</p>';
+                } else {
+                    const dateObj = new Date(bucket.last_update);
+                    detailsHTML = `
+                        <p>Status: <strong style="color: ${bucket.status === 'healthy' ? 'var(--healthy)' : 'var(--stale)'}">${statusText}</strong></p>
+                        <p>Last Update: <span class="timestamp">${dateObj.toLocaleString()}</span></p>
+                        <p>Latest File: <span class="timestamp" title="${bucket.latest_file}">${bucket.latest_file.split('/').pop()}</span></p>
+                        <p>Total Storage: <strong>${formatBytes(bucket.size)}</strong></p>
+                        <p><i>${timeSince(bucket.last_update)}</i></p>
+                    `;
+                }
+
+                cardElement.innerHTML = `
+                    <div class="bucket-name">
+                        ${bucket.name}
+                        <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                    </div>
+                    <div class="bucket-details">
+                        ${detailsHTML}
+                    </div>
+                `;
+            } catch (err) {
+                bucketStatuses[bucketName] = 'error';
+                updateStatsUI();
+                saveToLocalStorage();
+                cardElement.innerHTML = `
+                    <div class="bucket-name">${bucketName} <span class="status-indicator status-error"></span></div>
+                    <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
+                `;
+            }
+        }
+
+        async function fetchData(isInitial = false, mode = 'fast') {
+            const loadingEl = document.getElementById('loading');
+            const dashboard = document.getElementById('dashboard');
+            
+            loadingEl.style.display = 'block';
+            loadingEl.innerHTML = '<div class="spinner"></div> Mengambil daftar bucket...';
+            
+            if (isInitial || dashboard.innerHTML === '') {
+                dashboard.innerHTML = '';
+            }
+            
+            try {
+                // Simpan size lama sebelum cache dihapus
+                previousSizes = {};
+                bucketDataCache.forEach(b => {
+                    previousSizes[b.name] = b.size;
+                });
+                
+                bucketDataCache = []; // Reset cache saat menarik ulang data
+                // Kosongkan bucketStatuses juga
+                for (let prop in bucketStatuses) { if (bucketStatuses.hasOwnProperty(prop)) { delete bucketStatuses[prop]; } }
+                
+                const res = await fetch('/api/buckets');
+                const data = await res.json();
+                
+                if (data.error) throw new Error(data.error);
+
+                loadingEl.style.display = 'none';
+                document.getElementById('last-fetched').innerText = 'Data terakhir ditarik: ' + new Date().toLocaleString();
+                
+                totalBucketsCount = data.buckets.length;
+                updateStatsUI();
+                saveToLocalStorage();
+                
+                const currentBuckets = new Set(data.buckets.map(b => b.name));
+                
+                data.buckets.forEach(bucket => {
+                    let cardId = 'card-' + bucket.name.replace(/[^a-zA-Z0-9_-]/g, '');
+                    let card = document.getElementById(cardId);
+                    
+                    if (!card) {
+                        card = document.createElement('div');
+                        card.className = 'bucket-card';
+                        card.id = cardId;
+                        card.innerHTML = `
+                            <div class="bucket-name">${bucket.name}</div>
+                            <div class="bucket-details" style="text-align:center; padding: 1rem 0;">
+                                <div class="spinner" style="width:20px; height:20px; border-width:2px; display:inline-block; margin-bottom:0;"></div>
+                                <span style="font-size:0.8rem; margin-left:10px;">Scanning files...</span>
+                            </div>
+                        `;
+                        dashboard.appendChild(card);
+                    } else {
+                        // Tampilkan loading di kartu yang ada
+                        card.innerHTML = `
+                            <div class="bucket-name">${bucket.name}</div>
+                            <div class="bucket-details" style="text-align:center; padding: 1rem 0;">
+                                <div class="spinner" style="width:20px; height:20px; border-width:2px; display:inline-block; margin-bottom:0;"></div>
+                                <span style="font-size:0.8rem; margin-left:10px;">Updating...</span>
+                            </div>
+                        `;
+                    }
+                    
+                    fetchBucketDetail(bucket.name, card, mode);
+                });
+
+            } catch (err) {
+                loadingEl.style.display = 'block';
+                loadingEl.innerHTML = '<p style="color:var(--stale)">Error: ' + err.message + '</p>';
+            }
+        }
+
+        function init() {
+            const cachedData = loadFromLocalStorage();
+            if (cachedData) {
+                // Load langsung dari memori lokal (tanpa loading scan API)
+                renderDashboardFromCache(cachedData);
+            } else {
+                // Baru lakukan scan penuh jika benar-benar pertama kali dan belum ada cache
+                // Kita gunakan deep scan untuk inisialisasi pertama agar ukurannya didapat
+                fetchData(true, 'deep');
+            }
+        }
+
+        // Auto-refresh at midnight (sehari sekali di malam hari) dengan DEEP scan
+        function scheduleMidnightRefresh() {
+            const now = new Date();
+            const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+            const timeUntilMidnight = tomorrow - now;
+            
+            setTimeout(() => {
+                fetchData(false, 'deep');
+                setInterval(() => fetchData(false, 'deep'), 24 * 60 * 60 * 1000);
+            }, timeUntilMidnight);
+        }
+        
+        // Mulai aplikasi
+        init();
+        scheduleMidnightRefresh();
+    </script>
+</body>
+</html>
