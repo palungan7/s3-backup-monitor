@@ -161,6 +161,97 @@
             100% { transform: rotate(360deg); }
         }
 
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal {
+            background: #1e293b;
+            border: 1px solid var(--card-border);
+            border-radius: 1rem;
+            padding: 2rem;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal h2 {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--card-border);
+            background: #0f172a;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            box-sizing: border-box;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .btn-cancel {
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid #94a3b8;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .btn-save {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+
+        .btn-save:hover {
+            background: #2563eb;
+        }
+
         @media (max-width: 768px) {
             .stats { flex-direction: column; }
         }
@@ -174,6 +265,7 @@
                 <div id="last-fetched" style="font-size:0.9rem; color:#94a3b8; margin-top:0.5rem;">Data terakhir ditarik: Memuat...</div>
             </div>
             <div style="display:flex; gap:1rem;">
+                <button onclick="openSettings()" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.2); padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Pengaturan">⚙️ Settings</button>
                 <button onclick="exportToExcel()" style="background:#10b981; color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Download hasil pindaian terakhir sebagai Excel/CSV">⬇️ Export (CSV)</button>
                 <button onclick="fetchData(false, 'deep')" style="background:#64748b; color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Hitung ulang Total Storage (memakan waktu agak lama)">Deep Refresh</button>
                 <button onclick="fetchData()" style="background:var(--primary); color:white; border:none; padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Cek status Last Update dengan sangat cepat">Refresh Data</button>
@@ -201,6 +293,39 @@
         </div>
 
         <div class="dashboard" id="dashboard"></div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <h2>Pengaturan Sistem</h2>
+            <div class="form-group">
+                <label>S3 Endpoint URL</label>
+                <input type="text" id="config-endpoint" placeholder="https://s3member.pajakku.com">
+            </div>
+            <div class="form-group">
+                <label>Access Key</label>
+                <input type="text" id="config-access">
+            </div>
+            <div class="form-group">
+                <label>Secret Key</label>
+                <input type="password" id="config-secret">
+            </div>
+            <div style="display:flex; gap:1rem;">
+                <div class="form-group" style="flex:1;">
+                    <label>Jadwal Deep Scan (Jam)</label>
+                    <input type="number" id="config-hour" min="0" max="23" placeholder="0">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Jadwal Deep Scan (Menit)</label>
+                    <input type="number" id="config-minute" min="0" max="59" placeholder="0">
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeSettings()">Batal</button>
+                <button class="btn-save" onclick="saveSettings()" id="btn-save-settings">Simpan</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -274,30 +399,7 @@
             document.getElementById('stale-buckets').innerText = stale;
         }
 
-        function saveToLocalStorage() {
-            const data = {
-                timestamp: document.getElementById('last-fetched').innerText,
-                buckets: bucketDataCache,
-                bucketStatuses: Object.assign({}, bucketStatuses),
-                totalBucketsCount: totalBucketsCount
-            };
-            localStorage.setItem('s3_monitor_data', JSON.stringify(data));
-        }
-
-        function loadFromLocalStorage() {
-            const cached = localStorage.getItem('s3_monitor_data');
-            if (cached) {
-                try {
-                    const data = JSON.parse(cached);
-                    if (data.buckets && data.buckets.length > 0) {
-                        return data;
-                    }
-                } catch (e) {
-                    console.error("Gagal membaca cache lokal", e);
-                }
-            }
-            return null;
-        }
+        // Removed localStorage functions since we use backend cache now.
 
         function renderDashboardFromCache(data) {
             document.getElementById('last-fetched').innerText = data.timestamp;
@@ -375,7 +477,6 @@
                 
                 bucketStatuses[bucketName] = bucket.status;
                 updateStatsUI();
-                saveToLocalStorage();
 
                 let statusColor = 'status-' + bucket.status;
                 let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
@@ -408,7 +509,6 @@
             } catch (err) {
                 bucketStatuses[bucketName] = 'error';
                 updateStatsUI();
-                saveToLocalStorage();
                 cardElement.innerHTML = `
                     <div class="bucket-name">${bucketName} <span class="status-indicator status-error"></span></div>
                     <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
@@ -428,11 +528,13 @@
             }
             
             try {
-                // Simpan size lama sebelum cache dihapus
-                previousSizes = {};
-                bucketDataCache.forEach(b => {
-                    previousSizes[b.name] = b.size;
-                });
+                if (!isInitial) {
+                    // Simpan size lama sebelum cache dihapus
+                    previousSizes = {};
+                    bucketDataCache.forEach(b => {
+                        previousSizes[b.name] = b.size;
+                    });
+                }
                 
                 bucketDataCache = []; // Reset cache saat menarik ulang data
                 // Kosongkan bucketStatuses juga
@@ -448,7 +550,6 @@
                 
                 totalBucketsCount = data.buckets.length;
                 updateStatsUI();
-                saveToLocalStorage();
                 
                 const currentBuckets = new Set(data.buckets.map(b => b.name));
                 
@@ -488,33 +589,80 @@
             }
         }
 
-        function init() {
-            const cachedData = loadFromLocalStorage();
-            if (cachedData) {
-                // Load langsung dari memori lokal (tanpa loading scan API)
-                renderDashboardFromCache(cachedData);
-            } else {
-                // Baru lakukan scan penuh jika benar-benar pertama kali dan belum ada cache
-                // Kita gunakan deep scan untuk inisialisasi pertama agar ukurannya didapat
-                fetchData(true, 'deep');
+        async function init() {
+            try {
+                // Tarik cache size dari backend (hasil background job semalam)
+                const cacheRes = await fetch('/api/cache');
+                const cacheData = await cacheRes.json();
+                
+                // Masukkan ke memori previousSizes agar dipakai saat fetchBucketDetail mode=fast
+                for (let bName in cacheData) {
+                    previousSizes[bName] = cacheData[bName];
+                }
+            } catch (e) {
+                console.error("Gagal memuat cache dari backend:", e);
+            }
+            
+            // Langsung lakukan fast scan saat pertama kali buka web
+            fetchData(true, 'fast');
+        }
+
+        // Modal functions
+        async function openSettings() {
+            document.getElementById('settingsModal').style.display = 'flex';
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                document.getElementById('config-endpoint').value = data.S3_ENDPOINT || '';
+                document.getElementById('config-access').value = data.S3_ACCESS_KEY || '';
+                document.getElementById('config-secret').value = data.S3_SECRET_KEY || '';
+                document.getElementById('config-hour').value = data.SCAN_HOUR !== undefined ? data.SCAN_HOUR : 0;
+                document.getElementById('config-minute').value = data.SCAN_MINUTE !== undefined ? data.SCAN_MINUTE : 0;
+            } catch (e) {
+                console.error("Gagal memuat konfigurasi", e);
             }
         }
 
-        // Auto-refresh at midnight (sehari sekali di malam hari) dengan DEEP scan
-        function scheduleMidnightRefresh() {
-            const now = new Date();
-            const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
-            const timeUntilMidnight = tomorrow - now;
-            
-            setTimeout(() => {
-                fetchData(false, 'deep');
-                setInterval(() => fetchData(false, 'deep'), 24 * 60 * 60 * 1000);
-            }, timeUntilMidnight);
+        function closeSettings() {
+            document.getElementById('settingsModal').style.display = 'none';
         }
-        
+
+        async function saveSettings() {
+            const btn = document.getElementById('btn-save-settings');
+            btn.innerText = 'Menyimpan...';
+            btn.disabled = true;
+
+            const payload = {
+                S3_ENDPOINT: document.getElementById('config-endpoint').value,
+                S3_ACCESS_KEY: document.getElementById('config-access').value,
+                S3_SECRET_KEY: document.getElementById('config-secret').value,
+                SCAN_HOUR: parseInt(document.getElementById('config-hour').value) || 0,
+                SCAN_MINUTE: parseInt(document.getElementById('config-minute').value) || 0
+            };
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!res.ok) throw new Error('Gagal menyimpan konfigurasi');
+                
+                closeSettings();
+                
+                // Segarkan data dengan konfigurasi baru
+                fetchData(true, 'fast');
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                btn.innerText = 'Simpan';
+                btn.disabled = false;
+            }
+        }
+
         // Mulai aplikasi
         init();
-        scheduleMidnightRefresh();
     </script>
 </body>
 </html>
