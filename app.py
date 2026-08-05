@@ -12,6 +12,8 @@ app = Flask(__name__)
 CACHE_FILE = 'cache.json'
 CONFIG_FILE = 'config.json'
 
+cache_lock = threading.Lock()
+
 DEFAULT_CONFIG = {
     'S3_ENDPOINT': 'https://s3member.pajakku.com',
     'S3_ACCESS_KEY': 'optek',
@@ -68,17 +70,19 @@ def save_cache(data):
         json.dump(data, f)
 
 def update_bucket_in_cache(bucket_name, data_dict):
-    cache = load_cache()
-    if bucket_name not in cache['buckets']:
-        cache['buckets'][bucket_name] = {}
-    
-    for k, v in data_dict.items():
-        if v is not None:
-            cache['buckets'][bucket_name][k] = v
-            
-    cache['timestamp'] = datetime.now(timezone.utc).isoformat()
-    save_cache(cache)
-    return cache['buckets'][bucket_name]
+    with cache_lock:
+        cache = load_cache()
+        if bucket_name not in cache['buckets']:
+            cache['buckets'][bucket_name] = {}
+        
+        for k, v in data_dict.items():
+            if v is not None:
+                cache['buckets'][bucket_name][k] = v
+                
+        cache['timestamp'] = datetime.now(timezone.utc).isoformat()
+        save_cache(cache)
+        # Salin return value agar tidak mengakses dict yang mungkin berubah
+        return cache['buckets'][bucket_name].copy()
 
 def calculate_all_storage():
     print(f"[{datetime.now()}] Starting background deep scan...")
@@ -88,7 +92,8 @@ def calculate_all_storage():
         buckets = response.get('Buckets', [])
         
         paginator = client.get_paginator('list_objects_v2')
-        cache = load_cache()
+        # Buat temporary dictionary agar tidak mengunci cache selama scan berjam-jam
+        temp_cache = {'buckets': {}}
         
         for b in buckets:
             bucket_name = b['Name']
@@ -119,15 +124,24 @@ def calculate_all_storage():
                 else:
                     bucket_data['status'] = 'empty'
                 
-                if bucket_name not in cache['buckets']:
-                    cache['buckets'][bucket_name] = {}
-                cache['buckets'][bucket_name].update(bucket_data)
+                if bucket_name not in temp_cache['buckets']:
+                    temp_cache['buckets'][bucket_name] = {}
+                temp_cache['buckets'][bucket_name].update(bucket_data)
                 
             except Exception as e:
                 print(f"Error deep scanning {bucket_name}: {e}")
                 
-        cache['timestamp'] = datetime.now(timezone.utc).isoformat()
-        save_cache(cache)
+        with cache_lock:
+            # Load cache terbaru, lalu merge dengan hasil scan
+            final_cache = load_cache()
+            for b_name, b_data in temp_cache['buckets'].items():
+                if b_name not in final_cache['buckets']:
+                    final_cache['buckets'][b_name] = {}
+                final_cache['buckets'][b_name].update(b_data)
+            
+            final_cache['timestamp'] = datetime.now(timezone.utc).isoformat()
+            save_cache(final_cache)
+            
         print(f"[{datetime.now()}] Finished background deep scan. Cache updated.")
     except Exception as e:
         print(f"[{datetime.now()}] Failed background deep scan: {e}")
