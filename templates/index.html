@@ -197,6 +197,40 @@
             100% { transform: rotate(360deg); }
         }
 
+        .control-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .control-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .control-select {
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--card-border);
+            background: #1e293b;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+        }
+
         /* Modal Styles */
         .modal-overlay {
             display: none;
@@ -329,6 +363,22 @@
         <div id="loading" class="loading">
             <div class="spinner"></div>
             Memuat data dari s3member.pajakku.com...
+        </div>
+
+        <div class="control-bar">
+            <input type="text" id="search-bucket" class="control-input" placeholder="Cari nama atau IP bucket..." oninput="renderFilteredDashboard()">
+            <select id="filter-status" class="control-select" onchange="renderFilteredDashboard()">
+                <option value="all">Semua Status</option>
+                <option value="healthy">Hanya Healthy</option>
+                <option value="stale">Hanya Stale / Error</option>
+                <option value="empty">Hanya Empty</option>
+            </select>
+            <select id="sort-by" class="control-select" onchange="renderFilteredDashboard()">
+                <option value="name-asc">Nama (A-Z)</option>
+                <option value="storage-desc">Storage Terbesar</option>
+                <option value="update-desc">Update Terbaru</option>
+                <option value="update-asc">Update Terlama (Oldest)</option>
+            </select>
         </div>
 
         <div class="dashboard" id="dashboard"></div>
@@ -505,6 +555,61 @@
             
             updateStatsUI();
             document.getElementById('loading').style.display = 'none';
+            renderFilteredDashboard();
+        }
+
+        function renderFilteredDashboard() {
+            const searchText = document.getElementById('search-bucket').value.toLowerCase();
+            const filterStatus = document.getElementById('filter-status').value;
+            const sortBy = document.getElementById('sort-by').value;
+            
+            let sortedBuckets = [...bucketDataCache];
+            
+            sortedBuckets.sort((a, b) => {
+                if (sortBy === 'name-asc') {
+                    return a.name.localeCompare(b.name);
+                } else if (sortBy === 'storage-desc') {
+                    const sizeA = a.size || 0;
+                    const sizeB = b.size || 0;
+                    return sizeB - sizeA;
+                } else if (sortBy === 'update-asc') {
+                    const dateA = a.last_update ? new Date(a.last_update).getTime() : 0;
+                    const dateB = b.last_update ? new Date(b.last_update).getTime() : 0;
+                    return dateA - dateB;
+                } else if (sortBy === 'update-desc') {
+                    const dateA = a.last_update ? new Date(a.last_update).getTime() : 0;
+                    const dateB = b.last_update ? new Date(b.last_update).getTime() : 0;
+                    return dateB - dateA;
+                }
+                return 0;
+            });
+
+            const orderMap = {};
+            sortedBuckets.forEach((b, index) => {
+                orderMap[b.name] = index;
+            });
+
+            bucketDataCache.forEach(bucket => {
+                const cardId = 'card-' + bucket.name.replace(/[^a-zA-Z0-9_-]/g, '');
+                const card = document.getElementById(cardId);
+                if (!card) return;
+
+                let isMatch = true;
+
+                if (searchText && !bucket.name.toLowerCase().includes(searchText)) {
+                    isMatch = false;
+                }
+
+                if (filterStatus !== 'all') {
+                    const status = bucket.status || 'empty';
+                    if (filterStatus === 'healthy' && status !== 'healthy') isMatch = false;
+                    if (filterStatus === 'stale' && (status !== 'stale' && status !== 'error')) isMatch = false;
+                    if (filterStatus === 'empty' && status !== 'empty') isMatch = false;
+                }
+
+                card.style.display = isMatch ? 'block' : 'none';
+                card.style.order = orderMap[bucket.name];
+            });
         }
 
         async function fetchBucketDetail(bucketName, cardElement, mode = 'fast') {
@@ -574,6 +679,7 @@
                     <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
                 `;
             }
+            renderFilteredDashboard();
         }
 
         async function refreshSingleCard(bucketName) {
