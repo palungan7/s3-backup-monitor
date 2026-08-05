@@ -11,3 +11,5 @@ COPY templates/ templates/
 EXPOSE 3000
 
 CMD ["python", "app.py"]
+
+COPY static/ static/
