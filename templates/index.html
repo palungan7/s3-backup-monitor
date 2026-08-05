@@ -137,6 +137,27 @@
         .status-empty { background-color: var(--empty); }
         .status-error { background-color: var(--stale); }
 
+        .btn-refresh-card {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-right: 0.5rem;
+            padding: 0;
+            transition: color 0.3s, transform 0.3s;
+        }
+        
+        .btn-refresh-card:hover {
+            color: var(--primary);
+        }
+        
+        .btn-refresh-card.spin {
+            animation: spin 1s linear infinite;
+            color: var(--primary);
+            pointer-events: none;
+        }
+
         .bucket-details {
             font-size: 0.9rem;
             color: #cbd5e1;
@@ -470,7 +491,10 @@
                 card.innerHTML = `
                     <div class="bucket-name">
                         ${bucket.name}
-                        <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                        <div>
+                            <button class="btn-refresh-card" onclick="refreshSingleCard('${bucket.name}')" title="Refresh kartu ini">🔄</button>
+                            <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                        </div>
                     </div>
                     <div class="bucket-details">
                         ${detailsHTML}
@@ -527,7 +551,10 @@
                 cardElement.innerHTML = `
                     <div class="bucket-name">
                         ${bucket.name}
-                        <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                        <div>
+                            <button class="btn-refresh-card" onclick="refreshSingleCard('${bucket.name}')" title="Refresh kartu ini">🔄</button>
+                            <span class="status-indicator ${statusColor}" title="${statusText}"></span>
+                        </div>
                     </div>
                     <div class="bucket-details">
                         ${detailsHTML}
@@ -537,10 +564,35 @@
                 bucketStatuses[bucketName] = 'error';
                 updateStatsUI();
                 cardElement.innerHTML = `
-                    <div class="bucket-name">${bucketName} <span class="status-indicator status-error"></span></div>
+                    <div class="bucket-name">
+                        ${bucketName} 
+                        <div>
+                            <button class="btn-refresh-card" onclick="refreshSingleCard('${bucketName}')" title="Refresh kartu ini">🔄</button>
+                            <span class="status-indicator status-error"></span>
+                        </div>
+                    </div>
                     <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
                 `;
             }
+        }
+
+        async function refreshSingleCard(bucketName) {
+            const cardId = 'card-' + bucketName.replace(/[^a-zA-Z0-9_-]/g, '');
+            const card = document.getElementById(cardId);
+            if (!card) return;
+
+            const btn = card.querySelector('.btn-refresh-card');
+            if (btn) btn.classList.add('spin');
+            
+            const detailsContainer = card.querySelector('.bucket-details');
+            detailsContainer.innerHTML = `
+                <div style="text-align:center; padding: 1rem 0;">
+                    <div class="spinner" style="width:20px; height:20px; border-width:2px; display:inline-block; margin-bottom:0;"></div>
+                    <span style="font-size:0.8rem; margin-left:10px;">Updating...</span>
+                </div>
+            `;
+
+            await fetchBucketDetail(bucketName, card, 'fast');
         }
 
         async function fetchData(isInitial = false, mode = 'fast') {
