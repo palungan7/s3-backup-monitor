@@ -399,7 +399,30 @@
             document.getElementById('stale-buckets').innerText = stale;
         }
 
-        // Removed localStorage functions since we use backend cache now.
+        function saveToLocalStorage() {
+            const data = {
+                timestamp: document.getElementById('last-fetched').innerText,
+                buckets: bucketDataCache,
+                bucketStatuses: Object.assign({}, bucketStatuses),
+                totalBucketsCount: totalBucketsCount
+            };
+            localStorage.setItem('s3_monitor_data', JSON.stringify(data));
+        }
+
+        function loadFromLocalStorage() {
+            const cached = localStorage.getItem('s3_monitor_data');
+            if (cached) {
+                try {
+                    const data = JSON.parse(cached);
+                    if (data.buckets && data.buckets.length > 0) {
+                        return data;
+                    }
+                } catch (e) {
+                    console.error("Gagal membaca cache lokal", e);
+                }
+            }
+            return null;
+        }
 
         function renderDashboardFromCache(data) {
             document.getElementById('last-fetched').innerText = data.timestamp;
@@ -477,6 +500,7 @@
                 
                 bucketStatuses[bucketName] = bucket.status;
                 updateStatsUI();
+                saveToLocalStorage();
 
                 let statusColor = 'status-' + bucket.status;
                 let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
@@ -509,6 +533,7 @@
             } catch (err) {
                 bucketStatuses[bucketName] = 'error';
                 updateStatsUI();
+                saveToLocalStorage();
                 cardElement.innerHTML = `
                     <div class="bucket-name">${bucketName} <span class="status-indicator status-error"></span></div>
                     <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
@@ -550,6 +575,7 @@
                 
                 totalBucketsCount = data.buckets.length;
                 updateStatsUI();
+                saveToLocalStorage();
                 
                 const currentBuckets = new Set(data.buckets.map(b => b.name));
                 
@@ -590,12 +616,18 @@
         }
 
         async function init() {
+            // Render instant dari localStorage agar UI tidak kosong/loading (Sesuai permintaan)
+            const cachedUI = loadFromLocalStorage();
+            if (cachedUI) {
+                renderDashboardFromCache(cachedUI);
+            }
+
             try {
                 // Tarik cache size dari backend (hasil background job semalam)
                 const cacheRes = await fetch('/api/cache');
                 const cacheData = await cacheRes.json();
                 
-                // Masukkan ke memori previousSizes agar dipakai saat fetchBucketDetail mode=fast
+                // Masukkan ke memori previousSizes agar dipakai saat refresh mode=fast
                 for (let bName in cacheData) {
                     previousSizes[bName] = cacheData[bName];
                 }
@@ -603,8 +635,10 @@
                 console.error("Gagal memuat cache dari backend:", e);
             }
             
-            // Langsung lakukan fast scan saat pertama kali buka web
-            fetchData(true, 'fast');
+            // Jika belum ada data sama sekali di browser, baru lakukan fetch
+            if (!cachedUI) {
+                fetchData(true, 'fast');
+            }
         }
 
         // Modal functions
