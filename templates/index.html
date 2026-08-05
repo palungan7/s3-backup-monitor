@@ -47,6 +47,20 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        
+        .header-title-container {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            width: 70px;
+            height: 70px;
+            border-radius: 1rem;
+            box-shadow: 0 0 20px rgba(96, 165, 250, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
 
         .stats {
             display: flex;
@@ -260,9 +274,12 @@
 <body>
     <div class="container">
         <header>
-            <div>
-                <h1>S3 Backup Monitor</h1>
-                <div id="last-fetched" style="font-size:0.9rem; color:#94a3b8; margin-top:0.5rem;">Data terakhir ditarik: Memuat...</div>
+            <div class="header-title-container">
+                <img src="/static/logo.jpg" alt="Logo" class="logo">
+                <div>
+                    <h1>S3 Backup Monitor</h1>
+                    <div id="last-fetched" style="font-size:0.9rem; color:#94a3b8; margin-top:0.5rem;">Data terakhir ditarik: Memuat...</div>
+                </div>
             </div>
             <div style="display:flex; gap:1rem;">
                 <button onclick="openSettings()" style="background:transparent; color:white; border:1px solid rgba(255,255,255,0.2); padding:0.75rem 1.5rem; border-radius:2rem; cursor:pointer; font-family:'Outfit'; font-weight:600; transition:background 0.3s;" title="Pengaturan">⚙️ Settings</button>
