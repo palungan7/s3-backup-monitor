@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>S3 Backup Monitor</title>
+    <link rel="icon" type="image/jpeg" href="/static/logo.jpg?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -275,7 +276,7 @@
     <div class="container">
         <header>
             <div class="header-title-container">
-                <img src="/static/logo.jpg" alt="Logo" class="logo">
+                <img src="/static/logo.jpg?v=2" alt="Logo" class="logo">
                 <div>
                     <h1>S3 Backup Monitor</h1>
                     <div id="last-fetched" style="font-size:0.9rem; color:#94a3b8; margin-top:0.5rem;">Data terakhir ditarik: Memuat...</div>
@@ -347,6 +348,7 @@
 
     <script>
         function formatBytes(bytes, decimals = 2) {
+            if (bytes === undefined || bytes === null) return 'Menghitung...';
             if (!+bytes) return '0 Bytes';
             const k = 1024;
             const dm = decimals < 0 ? 0 : decimals;
@@ -371,7 +373,7 @@
             return Math.floor(seconds) + " seconds ago";
         }
 
-        const bucketStatuses = {};
+        let bucketStatuses = {};
         let totalBucketsCount = 0;
         let bucketDataCache = []; // Menyimpan data hasil tarikan terakhir untuk export
 
@@ -387,9 +389,8 @@
                 let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
                 let lastUpdate = bucket.last_update ? new Date(bucket.last_update).toLocaleString() : 'N/A';
                 let latestFile = bucket.latest_file || 'N/A';
-                let sizeStr = formatBytes(bucket.size || 0);
+                let sizeStr = bucket.size !== undefined ? formatBytes(bucket.size) : 'N/A';
                 
-                // Tambahkan tanda kutip ganda pada setiap kolom untuk menghindari error format CSV jika ada koma di dalam teks
                 let row = `"${bucket.name}","${statusText}","${lastUpdate}","${latestFile}","${sizeStr}"`;
                 csv += row + "\n";
             });
@@ -416,65 +417,51 @@
             document.getElementById('stale-buckets').innerText = stale;
         }
 
-        function saveToLocalStorage() {
-            const data = {
-                timestamp: document.getElementById('last-fetched').innerText,
-                buckets: bucketDataCache,
-                bucketStatuses: Object.assign({}, bucketStatuses),
-                totalBucketsCount: totalBucketsCount
-            };
-            localStorage.setItem('s3_monitor_data', JSON.stringify(data));
-        }
-
-        function loadFromLocalStorage() {
-            const cached = localStorage.getItem('s3_monitor_data');
-            if (cached) {
-                try {
-                    const data = JSON.parse(cached);
-                    if (data.buckets && data.buckets.length > 0) {
-                        return data;
-                    }
-                } catch (e) {
-                    console.error("Gagal membaca cache lokal", e);
-                }
-            }
-            return null;
-        }
-
         function renderDashboardFromCache(data) {
-            document.getElementById('last-fetched').innerText = data.timestamp;
-            totalBucketsCount = data.totalBucketsCount;
-            bucketDataCache = data.buckets;
+            const dateObj = new Date(data.timestamp);
+            document.getElementById('last-fetched').innerText = 'Data terakhir ditarik: ' + dateObj.toLocaleString();
             
-            // Restore bucketStatuses
-            for (const key in data.bucketStatuses) {
-                bucketStatuses[key] = data.bucketStatuses[key];
-            }
-            
-            updateStatsUI();
+            bucketDataCache = [];
+            bucketStatuses = {};
             
             const dashboard = document.getElementById('dashboard');
             dashboard.innerHTML = '';
             
-            data.buckets.forEach(bucket => {
+            const buckets = Object.keys(data.buckets).map(key => {
+                const b = data.buckets[key];
+                b.name = key;
+                return b;
+            });
+            
+            totalBucketsCount = buckets.length;
+            
+            buckets.forEach(bucket => {
+                bucketDataCache.push(bucket);
+                if (bucket.status) {
+                    bucketStatuses[bucket.name] = bucket.status;
+                }
+                
                 const card = document.createElement('div');
                 card.className = 'bucket-card';
                 card.id = 'card-' + bucket.name.replace(/[^a-zA-Z0-9_-]/g, '');
                 
-                let statusColor = 'status-' + bucket.status;
+                let statusColor = bucket.status ? 'status-' + bucket.status : 'status-empty';
                 let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
                 
                 let detailsHTML = '';
                 if (bucket.status === 'error') {
                     detailsHTML = '<p style="color:var(--stale)">Error memuat data</p>';
-                } else if (bucket.status === 'empty') {
-                    detailsHTML = '<p>Bucket kosong, tidak ada backup.</p>';
+                } else if (!bucket.status || bucket.status === 'empty') {
+                    detailsHTML = '<p>Belum ada data/Bucket kosong.</p>';
+                    if (bucket.size !== undefined) {
+                        detailsHTML += `<p>Total Storage: <strong>${formatBytes(bucket.size)}</strong></p>`;
+                    }
                 } else {
-                    const dateObj = new Date(bucket.last_update);
+                    const bDateObj = new Date(bucket.last_update);
                     detailsHTML = `
                         <p>Status: <strong style="color: ${bucket.status === 'healthy' ? 'var(--healthy)' : 'var(--stale)'}">${statusText}</strong></p>
-                        <p>Last Update: <span class="timestamp">${dateObj.toLocaleString()}</span></p>
-                        <p>Latest File: <span class="timestamp" title="${bucket.latest_file}">${bucket.latest_file.split('/').pop()}</span></p>
+                        <p>Last Update: <span class="timestamp">${bDateObj.toLocaleString()}</span></p>
+                        <p>Latest File: <span class="timestamp" title="${bucket.latest_file}">${bucket.latest_file ? bucket.latest_file.split('/').pop() : 'N/A'}</span></p>
                         <p>Total Storage: <strong>${formatBytes(bucket.size)}</strong></p>
                         <p><i>${timeSince(bucket.last_update)}</i></p>
                     `;
@@ -491,35 +478,31 @@
                 `;
                 dashboard.appendChild(card);
             });
+            
+            updateStatsUI();
             document.getElementById('loading').style.display = 'none';
         }
-
-        let previousSizes = {};
 
         async function fetchBucketDetail(bucketName, cardElement, mode = 'fast') {
             try {
                 const res = await fetch('/api/bucket/' + encodeURIComponent(bucketName) + '?mode=' + mode);
                 const bucket = await res.json();
                 
-                // Jika mode fast, gunakan ukuran dari cache lokal agar angkanya tidak hilang (0 bytes)
-                if (bucket.size === null) {
-                    if (previousSizes[bucketName] !== undefined && previousSizes[bucketName] !== null) {
-                        bucket.size = previousSizes[bucketName];
-                    } else {
-                        bucket.size = 0;
-                    }
-                }
-                
-                // Simpan ke cache untuk keperluan export Excel
                 const existingIndex = bucketDataCache.findIndex(b => b.name === bucketName);
-                if (existingIndex !== -1) bucketDataCache[existingIndex] = bucket;
-                else bucketDataCache.push(bucket);
+                if (existingIndex !== -1) {
+                    // Update size if deep mode, else keep old size
+                    if (mode !== 'deep' && bucketDataCache[existingIndex].size !== undefined && bucket.size === undefined) {
+                        bucket.size = bucketDataCache[existingIndex].size;
+                    }
+                    bucketDataCache[existingIndex] = bucket;
+                } else {
+                    bucketDataCache.push(bucket);
+                }
                 
                 bucketStatuses[bucketName] = bucket.status;
                 updateStatsUI();
-                saveToLocalStorage();
 
-                let statusColor = 'status-' + bucket.status;
+                let statusColor = bucket.status ? 'status-' + bucket.status : 'status-empty';
                 let statusText = bucket.status ? bucket.status.toUpperCase() : 'UNKNOWN';
                 
                 let detailsHTML = '';
@@ -527,6 +510,9 @@
                     detailsHTML = '<p style="color:var(--stale)">' + bucket.error + '</p>';
                 } else if (bucket.status === 'empty') {
                     detailsHTML = '<p>Bucket kosong, tidak ada backup.</p>';
+                    if (bucket.size !== undefined) {
+                        detailsHTML += `<p>Total Storage: <strong>${formatBytes(bucket.size)}</strong></p>`;
+                    }
                 } else {
                     const dateObj = new Date(bucket.last_update);
                     detailsHTML = `
@@ -550,7 +536,6 @@
             } catch (err) {
                 bucketStatuses[bucketName] = 'error';
                 updateStatsUI();
-                saveToLocalStorage();
                 cardElement.innerHTML = `
                     <div class="bucket-name">${bucketName} <span class="status-indicator status-error"></span></div>
                     <div class="bucket-details"><p style="color:var(--stale)">Gagal memuat data</p></div>
@@ -562,39 +547,22 @@
             const loadingEl = document.getElementById('loading');
             const dashboard = document.getElementById('dashboard');
             
-            loadingEl.style.display = 'block';
-            loadingEl.innerHTML = '<div class="spinner"></div> Mengambil daftar bucket...';
-            
             if (isInitial || dashboard.innerHTML === '') {
+                loadingEl.style.display = 'block';
+                loadingEl.innerHTML = '<div class="spinner"></div> Mengambil daftar bucket...';
                 dashboard.innerHTML = '';
             }
             
             try {
-                if (!isInitial) {
-                    // Simpan size lama sebelum cache dihapus
-                    previousSizes = {};
-                    bucketDataCache.forEach(b => {
-                        previousSizes[b.name] = b.size;
-                    });
-                }
-                
-                bucketDataCache = []; // Reset cache saat menarik ulang data
-                // Kosongkan bucketStatuses juga
-                for (let prop in bucketStatuses) { if (bucketStatuses.hasOwnProperty(prop)) { delete bucketStatuses[prop]; } }
-                
                 const res = await fetch('/api/buckets');
                 const data = await res.json();
                 
                 if (data.error) throw new Error(data.error);
 
                 loadingEl.style.display = 'none';
-                document.getElementById('last-fetched').innerText = 'Data terakhir ditarik: ' + new Date().toLocaleString();
                 
                 totalBucketsCount = data.buckets.length;
                 updateStatsUI();
-                saveToLocalStorage();
-                
-                const currentBuckets = new Set(data.buckets.map(b => b.name));
                 
                 data.buckets.forEach(bucket => {
                     let cardId = 'card-' + bucket.name.replace(/[^a-zA-Z0-9_-]/g, '');
@@ -613,7 +581,7 @@
                         `;
                         dashboard.appendChild(card);
                     } else {
-                        // Tampilkan loading di kartu yang ada
+                        // Tampilkan updating di kartu yang ada
                         card.innerHTML = `
                             <div class="bucket-name">${bucket.name}</div>
                             <div class="bucket-details" style="text-align:center; padding: 1rem 0;">
@@ -633,27 +601,19 @@
         }
 
         async function init() {
-            // Render instant dari localStorage agar UI tidak kosong/loading (Sesuai permintaan)
-            const cachedUI = loadFromLocalStorage();
-            if (cachedUI) {
-                renderDashboardFromCache(cachedUI);
-            }
-
             try {
-                // Tarik cache size dari backend (hasil background job semalam)
-                const cacheRes = await fetch('/api/cache');
-                const cacheData = await cacheRes.json();
+                // Tarik SELURUH UI State dari backend secara instan!
+                const res = await fetch('/api/dashboard');
+                const cacheData = await res.json();
                 
-                // Masukkan ke memori previousSizes agar dipakai saat refresh mode=fast
-                for (let bName in cacheData) {
-                    previousSizes[bName] = cacheData[bName];
+                if (cacheData && cacheData.buckets && Object.keys(cacheData.buckets).length > 0) {
+                    renderDashboardFromCache(cacheData);
+                } else {
+                    // Jika backend benar-benar kosong, lakukan scan awal
+                    fetchData(true, 'fast');
                 }
             } catch (e) {
-                console.error("Gagal memuat cache dari backend:", e);
-            }
-            
-            // Jika belum ada data sama sekali di browser, baru lakukan fetch
-            if (!cachedUI) {
+                console.error("Gagal memuat dashboard dari backend:", e);
                 fetchData(true, 'fast');
             }
         }
