@@ -25,7 +25,6 @@ def load_config():
         try:
             with open(CONFIG_FILE, 'r') as f:
                 conf = json.load(f)
-                # Merge with defaults to ensure all keys exist
                 for k, v in DEFAULT_CONFIG.items():
                     if k not in conf:
                         conf[k] = v
@@ -34,7 +33,6 @@ def load_config():
             print(f"Error loading config: {e}")
             return DEFAULT_CONFIG.copy()
     else:
-        # Save default config if not exist
         save_config(DEFAULT_CONFIG)
         return DEFAULT_CONFIG.copy()
 
@@ -56,14 +54,31 @@ def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Ensure the new format is respected
+                if 'buckets' not in data:
+                    return {'timestamp': datetime.now(timezone.utc).isoformat(), 'buckets': {}}
+                return data
         except:
-            return {}
-    return {}
+            return {'timestamp': datetime.now(timezone.utc).isoformat(), 'buckets': {}}
+    return {'timestamp': datetime.now(timezone.utc).isoformat(), 'buckets': {}}
 
 def save_cache(data):
     with open(CACHE_FILE, 'w') as f:
         json.dump(data, f)
+
+def update_bucket_in_cache(bucket_name, data_dict):
+    cache = load_cache()
+    if bucket_name not in cache['buckets']:
+        cache['buckets'][bucket_name] = {}
+    
+    for k, v in data_dict.items():
+        if v is not None:
+            cache['buckets'][bucket_name][k] = v
+            
+    cache['timestamp'] = datetime.now(timezone.utc).isoformat()
+    save_cache(cache)
+    return cache['buckets'][bucket_name]
 
 def calculate_all_storage():
     print(f"[{datetime.now()}] Starting background deep scan...")
@@ -72,22 +87,47 @@ def calculate_all_storage():
         response = client.list_buckets()
         buckets = response.get('Buckets', [])
         
-        cache_data = load_cache()
         paginator = client.get_paginator('list_objects_v2')
+        cache = load_cache()
         
         for b in buckets:
             bucket_name = b['Name']
             total_size = 0
+            latest_obj = None
             try:
                 for page in paginator.paginate(Bucket=bucket_name):
                     contents = page.get('Contents', [])
                     for obj in contents:
                         total_size += obj['Size']
-                cache_data[bucket_name] = total_size
+                    if contents:
+                        page_latest = max(contents, key=lambda obj: obj['LastModified'])
+                        if not latest_obj or page_latest['LastModified'] > latest_obj['LastModified']:
+                            latest_obj = page_latest
+                
+                # Update logic
+                bucket_data = {'size': total_size}
+                if latest_obj:
+                    last_modified = latest_obj['LastModified']
+                    now = datetime.now(timezone.utc)
+                    delta = now - last_modified
+                    hours_ago = delta.total_seconds() / 3600
+                    status = 'healthy' if hours_ago < 48 else 'stale'
+                    
+                    bucket_data['last_update'] = last_modified.isoformat()
+                    bucket_data['latest_file'] = latest_obj['Key']
+                    bucket_data['status'] = status
+                else:
+                    bucket_data['status'] = 'empty'
+                
+                if bucket_name not in cache['buckets']:
+                    cache['buckets'][bucket_name] = {}
+                cache['buckets'][bucket_name].update(bucket_data)
+                
             except Exception as e:
                 print(f"Error deep scanning {bucket_name}: {e}")
                 
-        save_cache(cache_data)
+        cache['timestamp'] = datetime.now(timezone.utc).isoformat()
+        save_cache(cache)
         print(f"[{datetime.now()}] Finished background deep scan. Cache updated.")
     except Exception as e:
         print(f"[{datetime.now()}] Failed background deep scan: {e}")
@@ -115,7 +155,6 @@ def index():
 def handle_config():
     if request.method == 'POST':
         data = request.json
-        # Basic validation
         if not all(k in data for k in ['S3_ENDPOINT', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'SCAN_HOUR', 'SCAN_MINUTE']):
             return jsonify({'error': 'Missing required fields'}), 400
         
@@ -126,8 +165,6 @@ def handle_config():
             return jsonify({'error': 'SCAN_HOUR and SCAN_MINUTE must be integers'}), 400
 
         save_config(data)
-        
-        # Reschedule job
         scheduler.reschedule_job(
             'deep_scan_job', 
             trigger='cron', 
@@ -138,8 +175,9 @@ def handle_config():
     else:
         return jsonify(load_config())
 
-@app.route('/api/cache')
-def get_cache():
+@app.route('/api/dashboard')
+def get_dashboard():
+    # Return the entire cache as the single source of truth
     return jsonify(load_cache())
 
 @app.route('/api/buckets')
@@ -204,31 +242,34 @@ def get_bucket_detail(bucket_name):
             hours_ago = delta.total_seconds() / 3600
             status = 'healthy' if hours_ago < 48 else 'stale'
             
-            # If manual deep scan is requested, update cache
-            if mode == 'deep':
-                cache_data = load_cache()
-                cache_data[bucket_name] = total_size
-                save_cache(cache_data)
-                
-            return jsonify({
+            bucket_data = {
                 'name': bucket_name,
                 'last_update': last_modified.isoformat(),
-                'hours_ago': round(hours_ago, 2),
                 'status': status,
-                'latest_file': latest_obj['Key'],
-                'size': total_size if mode == 'deep' else None
-            })
+                'latest_file': latest_obj['Key']
+            }
+            if mode == 'deep':
+                bucket_data['size'] = total_size
+            
+            # Save to the backend cache immediately
+            merged_data = update_bucket_in_cache(bucket_name, bucket_data)
+            merged_data['name'] = bucket_name # ensure name is returned
+            
+            return jsonify(merged_data)
         else:
-            return jsonify({
+            bucket_data = {
                 'name': bucket_name,
-                'last_update': None,
-                'hours_ago': None,
                 'status': 'empty',
-                'latest_file': None,
-                'size': 0
-            })
+                'size': 0 if mode == 'deep' else None
+            }
+            merged_data = update_bucket_in_cache(bucket_name, bucket_data)
+            merged_data['name'] = bucket_name
+            return jsonify(merged_data)
     except Exception as e:
-        return jsonify({'name': bucket_name, 'error': str(e), 'status': 'error'})
+        bucket_data = {'name': bucket_name, 'error': str(e), 'status': 'error'}
+        merged_data = update_bucket_in_cache(bucket_name, bucket_data)
+        merged_data['name'] = bucket_name
+        return jsonify(merged_data)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=3000)
